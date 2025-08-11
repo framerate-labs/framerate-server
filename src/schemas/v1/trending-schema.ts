@@ -1,4 +1,4 @@
-import { z, ZodIssueCode } from "zod";
+import { z } from "zod";
 
 export const mediaBaseSchema = z.object({
   adult: z.boolean(),
@@ -41,30 +41,21 @@ const trendingPersonSchema = z.object({
   profile_path: z.string().nullable(),
 });
 
-export const trendingSchema = z.discriminatedUnion("media_type", [
-  trendingMovieSchema,
-  trendingTVSchema,
-  trendingPersonSchema,
-]);
-
-export function parseTrending(data: unknown) {
-  const result = trendingSchema.safeParse(data);
-  if (!result.success) {
-    const hasDiscriminatorError = result.error.issues.some(
-      (issue) =>
-        issue.code === ZodIssueCode.invalid_union_discriminator &&
-        issue.path[0] === "media_type",
-    );
-    if (hasDiscriminatorError) {
-      throw new Error(
-        'Invalid media_type for Trending. Must be "movie", "tv", or "person".',
-      );
-    }
-
-    throw result.error;
-  }
-  return result.data;
-}
+export const trendingSchema = z.discriminatedUnion(
+  "media_type",
+  [trendingMovieSchema, trendingTVSchema, trendingPersonSchema],
+  {
+    errorMap: (issue, ctx) => {
+      if (issue.code === z.ZodIssueCode.invalid_union_discriminator) {
+        return {
+          message:
+            'Invalid media type for Trending. Must be "movie", "tv", or "person".',
+        };
+      }
+      return { message: ctx.defaultError };
+    },
+  },
+);
 
 export const trendingResponseSchema = z.object({
   page: z.number(),

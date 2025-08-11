@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia";
 import { fetchTrending } from "@/services/v1/trending";
-import { parseTrending } from "@/schemas/v1/trending-schema";
 
 export const trending = new Elysia({ name: "trending" })
   .onError(({ code, error }) => {
@@ -22,7 +21,7 @@ export const trending = new Elysia({ name: "trending" })
     async ({ query }) => {
       const { filter, timeWindow } = query;
       const data = await fetchTrending(filter, timeWindow);
-      return parseTrending(data);
+      return data;
     },
     {
       query: t.Object({
