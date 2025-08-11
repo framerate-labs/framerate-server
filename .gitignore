@@ -6,13 +6,10 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
-
 # production
 /build
 *.bun-build
+dist
 
 # misc
 .DS_Store

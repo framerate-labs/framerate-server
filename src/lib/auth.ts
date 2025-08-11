@@ -5,6 +5,8 @@ import { username } from "better-auth/plugins";
 import { db } from "@/drizzle/index";
 import * as schema from "@/drizzle/schema";
 
+type AuthHandler = ReturnType<typeof betterAuth>;
+
 const trusted = [];
 
 if (process.env.CLIENT_ORIGIN) {
@@ -13,7 +15,7 @@ if (process.env.CLIENT_ORIGIN) {
 
 const isProduction = process.env.NODE_ENV === "production";
 
-export const auth = betterAuth({
+export const auth: AuthHandler = betterAuth({
   appName: "FrameRate",
   database: drizzleAdapter(db, {
     provider: "pg",
