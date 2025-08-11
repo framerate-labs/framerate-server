@@ -3,9 +3,13 @@
   "version": "1.0.50",
   "main": "dist/index.ts",
   "types": "dist/index.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "NODE_ENV=development bun run --watch src/index.ts",
+    "prepare": "bun run build:types",
     "build": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile build/server ./src/index.ts",
     "build:types": "tsc -p tsconfig.types.json",
     "start": "NODE_ENV=production ./build/server"
