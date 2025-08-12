@@ -7,18 +7,13 @@ import { cors } from "@elysiajs/cors";
 import { api } from "@/api/api-index";
 import { rateLimit } from "elysia-rate-limit";
 
-let allowedOrigins: string[] = [];
-
-if (process.env.CLIENT_ORIGIN) {
-  allowedOrigins.push(process.env.CLIENT_ORIGIN);
-}
+let allowedOrigins = ["https://www.frame-rate.io", "https://frame-rate.io"];
 
 if (process.env.NODE_ENV === "development" && process.env.DEV_ORIGIN) {
   allowedOrigins.push(process.env.DEV_ORIGIN);
 }
 
 const app = new Elysia()
-  .use(swagger())
   .use(
     rateLimit({
       max: 100,
@@ -35,6 +30,7 @@ const app = new Elysia()
       allowedHeaders: ["Content-Type", "Authorization"],
     }),
   )
+  .use(swagger())
   .use(api)
   .listen(8000);
 
