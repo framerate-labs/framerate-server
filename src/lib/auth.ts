@@ -44,9 +44,11 @@ export const auth: AuthHandler = betterAuth({
     cookiePrefix: "framerate",
     useSecureCookies: isProduction,
     defaultCookieAttributes: {
+      domain: ".frame-rate.io",
       httpOnly: true,
-      sameSite: isProduction ? "None" : "Lax",
       partitioned: isProduction,
+      path: "/",
+      sameSite: isProduction ? "None" : "Lax",
     },
   },
   trustedOrigins: trusted,
