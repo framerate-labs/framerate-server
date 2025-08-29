@@ -1,3 +1,5 @@
+import { authorizeOwner } from "@/lib/authorization";
+import { HttpError } from "@/lib/httpError";
 import { generateSlug } from "@/lib/slug";
 import { betterAuth } from "@/middlewares/auth-middleware";
 import { clientListSchema } from "@/schemas/v1/list-schema";
@@ -12,7 +14,13 @@ import Elysia, { t } from "elysia";
 export const lists = new Elysia({ name: "lists" })
   .use(betterAuth)
   .onError(({ code, error }) => {
-    console.error("Error in collections route:", error);
+    // console.error("Error in collections route:", error);
+
+    if (error instanceof HttpError) {
+      return { status: error.status, message: error.message };
+    }
+
+    console.log(error);
 
     if (code === 400) {
       return { status: code, message: "Invalid list name" };
@@ -86,6 +94,8 @@ export const lists = new Elysia({ name: "lists" })
   .patch(
     "/lists/:listId",
     async ({ user, body, params: { listId } }) => {
+      await authorizeOwner("list", listId, user?.id);
+
       const updates = { name: body.listName };
 
       const result = await updateList(user.id, listId, updates);

@@ -10,6 +10,7 @@ import { rateLimit } from "elysia-rate-limit";
 let allowedOrigins = ["https://www.frame-rate.io", "https://frame-rate.io"];
 
 if (process.env.NODE_ENV === "development" && process.env.DEV_ORIGIN) {
+  allowedOrigins.push("http://192.168.5.6");
   allowedOrigins.push(process.env.DEV_ORIGIN);
 }
 

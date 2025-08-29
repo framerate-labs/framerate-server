@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { username } from "better-auth/plugins";
+import { bearer, jwt, username } from "better-auth/plugins";
 
 import { db } from "@/drizzle/index";
 import * as schema from "@/drizzle/schema";
@@ -52,5 +52,9 @@ export const auth: AuthHandler = betterAuth({
     },
   },
   trustedOrigins: trusted,
-  plugins: [username({ minUsernameLength: 1, maxUsernameLength: 20 })],
+  plugins: [
+    bearer(),
+    jwt(),
+    username({ minUsernameLength: 1, maxUsernameLength: 20 }),
+  ],
 });
