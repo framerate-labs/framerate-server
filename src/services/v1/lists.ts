@@ -1,5 +1,4 @@
 import type { Session, User } from "better-auth";
-
 import { db } from "@/drizzle";
 import {
   listLikes,
@@ -15,15 +14,22 @@ import {
 import { and, asc, desc, eq, gte, or, sql } from "drizzle-orm";
 import { getHashedValue } from "@/lib/utils";
 import { generateSlug } from "@/lib/slug";
+import { HttpError } from "@/lib/httpError";
 
 type ListUpdates = {
   name: string;
 };
 
+type AddListItemResult = {
+  created: boolean;
+  item: typeof listItem.$inferSelect;
+};
+
 /**
- * Creates a list in database
+ * Creates a list in the database.
+ *
  * @param data - The list data to insert
- * @returns The newly created list
+ * @returns The newly created list with a stable `type: "list"`
  */
 export async function createList(data: typeof list.$inferInsert) {
   const [result] = await db.insert(list).values(data).returning();
@@ -32,9 +38,10 @@ export async function createList(data: typeof list.$inferInsert) {
 }
 
 /**
- * Gets all database lists belonging to a user
- * @param userId - The ID of the user for whom to get lists
- * @returns All lists belonging to the user
+ * Retrieves all lists belonging to a user, oldest first.
+ *
+ * @param userId - The user ID
+ * @returns An array of lists with a stable `type: "list"`
  */
 export async function getLists(userId: string) {
   const results = await db
@@ -51,11 +58,13 @@ export async function getLists(userId: string) {
 }
 
 /**
- * Updates list values if they have changed
- * @param userId - User that owns the list
+ * Updates list values (currently name/slug) if they have changed.
+ * Also records slug history when renaming.
+ *
+ * @param userId - Owner of the list
  * @param listId - List to update
- * @param updates - Updates to make to the list
- * @returns The updated list object from the DB
+ * @param updates - Fields to update
+ * @returns The updated list with a stable `type: "list"`
  */
 export async function updateList(
   userId: string,
@@ -69,9 +78,7 @@ export async function updateList(
       .where(and(eq(list.userId, userId), eq(list.id, listId)));
 
     if (!listRecord) {
-      throw new Error(
-        "List not found or you are not authorized to make changes to this list.",
-      );
+      throw new HttpError(404, "List not found");
     }
 
     if (updates.name && updates.name !== listRecord.name) {
@@ -101,10 +108,11 @@ export async function updateList(
 }
 
 /**
- * Deletes a user's list, including all related data such as slug history, likes, saves, and views
- * @param userId - ID of the list owner
- * @param listId - ID of the list to delete
- * @returns An object representing the deleted list
+ * Deletes a user's list. Related rows should be deleted at the DB level.
+ *
+ * @param userId - Owner ID
+ * @param listId - List ID
+ * @returns The deleted list row (for confirmation)
  */
 export async function deleteList(userId: string, listId: number) {
   const [listRecord] = await db
@@ -113,77 +121,130 @@ export async function deleteList(userId: string, listId: number) {
     .where(and(eq(list.userId, userId), eq(list.id, listId)));
 
   if (!listRecord) {
-    throw new Error(
-      "List not found or you are not authorized to make changes to this list.",
-    );
+    throw new HttpError(404, "List not found");
   }
 
-  // This is a cascading delete operation
   const [deletedList] = await db
     .delete(list)
     .where(and(eq(list.id, listId), eq(list.userId, userId)))
     .returning();
 
   if (!deletedList) {
-    throw new Error("Failed to delete the list or list was already deleted.");
+    throw new HttpError(500, "Failed to delete the list");
   }
 
   return deletedList;
 }
 
 /**
- * Adds list item to a user's existing database list
- * @param data - List item to insert
- * @returns The inserted list item or undefined
+ * Adds a media item to a user's list (idempotent, with ownership checks).
+ *
+ * Behavior:
+ * - Verifies the `listId` belongs to `userId` (authorization).
+ * - If the same media already exists on the list, returns it with `created: false`.
+ * - Otherwise inserts and updates the list's `updatedAt`, returning `created: true`.
+ *
+ * @param data - List item insert payload (userId, listId, mediaType, movieId/seriesId)
+ * @returns `{ created: boolean, item: listItem }`
  */
-export async function addListItem(data: typeof listItem.$inferInsert) {
-  const [result] = await db.transaction(async (trx) => {
-    const insertedItem = await trx.insert(listItem).values(data).returning();
+export async function addListItem(
+  data: typeof listItem.$inferInsert,
+): Promise<AddListItemResult | undefined> {
+  const { userId, listId, mediaType, movieId, seriesId } = data;
 
+  return db.transaction(async (trx) => {
+    // Verify ownership
+    const [owned] = await trx
+      .select({ id: list.id })
+      .from(list)
+      .where(and(eq(list.id, listId), eq(list.userId, userId)));
+
+    if (!owned) {
+      throw new HttpError(
+        403,
+        "You do not have permission to modify this list",
+      );
+    }
+
+    // Check if item already exists
+    const whereExisting =
+      mediaType === "movie"
+        ? and(
+            eq(listItem.userId, userId),
+            eq(listItem.listId, listId),
+            eq(listItem.mediaType, "movie"),
+            eq(listItem.movieId, movieId!),
+          )
+        : and(
+            eq(listItem.userId, userId),
+            eq(listItem.listId, listId),
+            eq(listItem.mediaType, "tv"),
+            eq(listItem.seriesId, seriesId!),
+          );
+
+    const [existing] = await trx.select().from(listItem).where(whereExisting);
+
+    if (existing) {
+      return { created: false, item: existing };
+    }
+
+    // Insert new item
+    const [inserted] = await trx.insert(listItem).values(data).returning();
+
+    // Refresh the list updatedAt field
     await trx
       .update(list)
       .set({ updatedAt: new Date() })
-      .where(eq(list.id, data.listId));
+      .where(eq(list.id, listId));
 
-    return insertedItem;
+    return inserted ? { created: true, item: inserted } : undefined;
   });
-
-  return result;
 }
 
 /**
- * Gets media saved to a list by the current user, if any
- * @param mediaId - The ID of the media to check
- * @param mediaType - The type of media ("movie" or "tv")
- * @returns The matching list item or undefined if it does not exist
+ * Retrieves the authenticated user's saved list item, if any, for a media.
+ *
+ * @param userId - The current user's ID
+ * @param mediaId - TMDB media ID
+ * @param mediaType - "movie" | "tv"
+ * @returns `{ listId, listItemId, mediaType, mediaId } | undefined`
  */
 export async function getListItem(
   userId: string,
   mediaId: number,
   mediaType: "movie" | "tv",
 ) {
-  // Determine which field to query based on media type
-  const mediaField = mediaType === "movie" ? "movieId" : "seriesId";
+  // Determine which field to query based on media type (typed narrowing)
+  const isMovie = mediaType === "movie";
 
   const [result] = await db
     .select({
       listId: listItem.listId,
       listItemId: listItem.id,
       mediaType: listItem.mediaType,
-      mediaId: mediaType === "movie" ? listItem.movieId : listItem.seriesId,
+      mediaId: isMovie ? listItem.movieId : listItem.seriesId,
     })
     .from(listItem)
-    .where(and(eq(listItem.userId, userId), eq(listItem[mediaField], mediaId)));
+    .where(
+      and(
+        eq(listItem.userId, userId),
+        isMovie
+          ? eq(listItem.movieId, mediaId)
+          : eq(listItem.seriesId, mediaId),
+      ),
+    );
 
   return result;
 }
 
 /**
- * Gets list data, including list items and metadata
- * @param username - The username of the user who created the list
- * @param slug - The list URL slug
- * @param userSession - If the list viewer is logged in, this is their active session
- * @returns An object with the list's data
+ * Returns public list data and viewer-specific flags
+ * (like/save) when a session user is provided.
+ *
+ * @param username - List owner's username
+ * @param slug - List slug
+ * @param userSession - Optional authenticated user object
+ * @returns `{ list, isLiked, isSaved, listItems }`
  */
 export async function getListData(
   username: string,
@@ -197,7 +258,7 @@ export async function getListData(
     .where(and(eq(user.username, username), eq(list.slug, slug)));
 
   if (!results) {
-    throw new Error("Error: something went wrong!");
+    throw new HttpError(404, "List not found");
   }
 
   const { list: listResult } = results;
@@ -225,9 +286,11 @@ export async function getListData(
 }
 
 /**
- * Gets all list items belonging to a list
- * @param listId - The ID of the list
- * @returns An array of list item objects
+ * Internal: Retrieves all list items for a given list ID,
+ * with unified fields across movie/TV via COALESCE/CASE.
+ *
+ * @param listId - The list ID
+ * @returns Array of list item rows
  */
 async function getListItems(listId: number) {
   try {
@@ -252,15 +315,16 @@ async function getListItems(listId: number) {
 
     return results;
   } catch (_error) {
-    throw new Error("Failed to get list items.");
+    throw new HttpError(500, "Failed to get list items");
   }
 }
 
 /**
- * Checks if the user has liked a list
- * @param userId - ID of the user
- * @param listId - ID of the list to check
- * @returns Boolean representing whether the list is liked by the user
+ * Internal: Checks if a user has liked a list.
+ *
+ * @param userId - User ID
+ * @param listId - List ID
+ * @returns Whether the list is liked by the user
  */
 async function getLikeStatus(userId: string, listId: number): Promise<boolean> {
   try {
@@ -278,15 +342,16 @@ async function getLikeStatus(userId: string, listId: number): Promise<boolean> {
 
     return false;
   } catch (_error) {
-    throw new Error("Failed to get like status!");
+    throw new HttpError(500, "Failed to get like status");
   }
 }
 
 /**
- * Checks if the user has saved a list
- * @param userId - ID of the user
- * @param listId - ID of the list to check
- * @returns Boolean representing whether the list is saved by the user
+ * Internal: Checks if a user has saved a list.
+ *
+ * @param userId - User ID
+ * @param listId - List ID
+ * @returns Whether the list is saved by the user
  */
 async function getSaveStatus(userId: string, listId: number): Promise<boolean> {
   try {
@@ -304,14 +369,16 @@ async function getSaveStatus(userId: string, listId: number): Promise<boolean> {
 
     return false;
   } catch (_error) {
-    throw new Error("Failed to get save status!");
+    throw new HttpError(500, "Failed to get save status");
   }
 }
 
 /**
- * Removes specific media from a user's list
- * @param listItemId - ID of the media to remove from a list
- * @returns The removed list item or undefined
+ * Deletes a list item if it belongs to the given user.
+ *
+ * @param userId - Owner of the item
+ * @param listItemId - Item ID to delete
+ * @returns The deleted row, or undefined if not found
  */
 export async function deleteListItem(userId: string, listItemId: number) {
   const [result] = await db
@@ -323,11 +390,13 @@ export async function deleteListItem(userId: string, listItemId: number) {
 }
 
 /**
- * Logs a view on a list if it is unique in a rolling 24-hour window
- * @param listId - ID of the list viewed
- * @param ipAddress - IP Adress of the viewer
- * @param userId - Optional ID of the viewer
- * @returns An object representing the status of the view
+ * Logs a unique view for a list within a rolling 24-hour window,
+ * per `(userId OR IP hash)`.
+ *
+ * @param listId - List ID
+ * @param ipAddress - Raw IP (hashed before storage)
+ * @param userId - Optional authenticated user ID
+ * @returns Status object with dedup info
  */
 export async function trackUniqueView(
   listId: number,
@@ -346,19 +415,26 @@ export async function trackUniqueView(
   const hashedIp = ipAddress ? getHashedValue(ipAddress) : null;
 
   try {
-    const existingView = await db
-      .select()
-      .from(listView)
-      .where(
-        and(
-          eq(listView.listId, listId),
-          gte(listView.createdAt, oneDayAgo),
-          or(
-            userId ? eq(listView.userId, userId) : undefined,
-            hashedIp ? eq(listView.ipAddress, hashedIp) : undefined,
-          ),
-        ),
-      );
+    const predicates = [
+      eq(listView.listId, listId),
+      gte(listView.createdAt, oneDayAgo),
+    ];
+
+    // Build OR(userId, ipHash) only with defined values
+    const identityOr =
+      userId && hashedIp
+        ? or(eq(listView.userId, userId), eq(listView.ipAddress, hashedIp))
+        : userId
+          ? eq(listView.userId, userId)
+          : hashedIp
+            ? eq(listView.ipAddress, hashedIp)
+            : undefined;
+
+    const whereClause = identityOr
+      ? and(...predicates, identityOr)
+      : and(...predicates);
+
+    const existingView = await db.select().from(listView).where(whereClause);
 
     if (existingView.length > 0) {
       return {

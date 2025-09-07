@@ -2,26 +2,27 @@ import { Elysia, t } from "elysia";
 import { fetchTrending } from "@/services/v1/trending";
 
 export const trending = new Elysia({ name: "trending" })
-  .onError(({ code, error }) => {
-    console.error("Error in trending route:", error);
-    if (code === "VALIDATION") {
-      return {
-        status: 400,
-        message: "Invaid request",
-      };
-    } else {
-      return {
-        status: 500,
-        message: "Something went wrong while fetching trending data!",
-      };
-    }
-  })
+
+  /**
+   * GET /trending
+   *
+   * Returns trending media from TMDB for the given filter and time window.
+   *
+   * - Public endpoint (no auth)
+   * - Validates query params
+   * - Stable response shape: `{ data, error: null }`
+   *
+   * @query filter     - "all" | "movie" | "tv" | "person"
+   * @query timeWindow - "day" | "week"
+   * @returns `{ data: TrendingItem[], error: null }`
+   */
   .get(
     "/trending",
-    async ({ query }) => {
-      const { filter, timeWindow } = query;
+    async ({ query: { filter, timeWindow }, set }) => {
       const data = await fetchTrending(filter, timeWindow);
-      return data;
+
+      set.status = 200;
+      return { data, error: null };
     },
     {
       query: t.Object({

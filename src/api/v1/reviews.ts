@@ -1,4 +1,5 @@
 import { betterAuth } from "@/middlewares/auth-middleware";
+import { httpError } from "@/lib/httpError";
 import {
   addReview,
   deleteReview,
@@ -10,45 +11,59 @@ import Elysia, { t } from "elysia";
 
 export const reviews = new Elysia({ name: "reviews" })
   .use(betterAuth)
-  // gets all user reviews
+
+  /**
+   * GET /reviews
+   *
+   * Returns all reviews authored by the authenticated user.
+   *
+   * - Requires authentication
+   * - Stable response shape: `{ data, error: null }`
+   *
+   * @returns `{ data: ReviewRow[], error: null }`
+   */
   .get(
     "/reviews",
-    async ({ user }) => {
-      if (user) {
-        const result = await getAllReviews(user.id);
+    async ({ user, set }) => {
+      if (!user) throw httpError(401, "Please login or signup to continue");
 
-        return {
-          data: result,
-          error: null,
-        };
-      } else {
-        return {
-          data: null,
-          error: "Not logged in",
-        };
-      }
+      const result = await getAllReviews(user.id);
+
+      set.status = 200;
+      return {
+        data: result,
+        error: null,
+      };
     },
     {
       auth: true,
     },
   )
-  // gets user review
+
+  /**
+   * GET /reviews/:mediaType/:mediaId
+   *
+   * Returns the authenticated user's review for a specific media item.
+   *
+   * - Requires authentication
+   * - Returns `null` when the user has not reviewed the item
+   *
+   * @param mediaType - "movie" | "tv"
+   * @param mediaId   - TMDB media ID
+   * @returns `{ data: { liked, watched, review, rating } | null, error: null }`
+   */
   .get(
     "/reviews/:mediaType/:mediaId",
-    async ({ user, params: { mediaType, mediaId } }) => {
-      if (user) {
-        const result = await getReview(user.id, mediaType, mediaId);
+    async ({ user, params: { mediaType, mediaId }, set }) => {
+      if (!user) throw httpError(401, "Please login or signup to continue");
 
-        return {
-          data: result,
-          error: null,
-        };
-      } else {
-        return {
-          data: null,
-          error: { code: 401, message: "Please login or signup to continue" },
-        };
-      }
+      const result = await getReview(user.id, mediaType, mediaId);
+
+      set.status = 200;
+      return {
+        data: result ?? null,
+        error: null,
+      };
     },
     {
       auth: true,
@@ -58,18 +73,37 @@ export const reviews = new Elysia({ name: "reviews" })
       }),
     },
   )
-  // creates user review
+
+  /**
+   * POST /reviews/:mediaType/:mediaId
+   *
+   * Creates or updates (upsert) the authenticated user's review for a media item.
+   *
+   * - Requires authentication
+   * - Server validates rating format/constraints
+   * - Upsert semantics: on conflict (same user + media), rating is updated
+   *
+   * Status codes:
+   * - 201 on create/update success
+   *
+   * @param mediaType - "movie" | "tv"
+   * @param mediaId   - TMDB media ID
+   * @body rating     - String rating (validated server-side)
+   * @returns `{ data: ReviewRow, error: null }`
+   */
   .post(
     "/reviews/:mediaType/:mediaId",
-    async ({ user, params: { mediaType, mediaId }, body: { rating } }) => {
-      if (user) {
-        const reviewData = { userId: user.id, mediaType, mediaId, rating };
-        const result = await addReview(reviewData);
-        return {
-          data: result,
-          error: null,
-        };
-      }
+    async ({ user, params: { mediaType, mediaId }, body: { rating }, set }) => {
+      if (!user) throw httpError(401, "Please login or signup to continue");
+
+      const reviewData = { userId: user.id, mediaType, mediaId, rating };
+      const result = await addReview(reviewData);
+
+      set.status = 201;
+      return {
+        data: result,
+        error: null,
+      };
     },
     {
       auth: true,
@@ -82,17 +116,34 @@ export const reviews = new Elysia({ name: "reviews" })
       }),
     },
   )
-  // deletes user review
+
+  /**
+   * DELETE /reviews/:mediaType/:mediaId
+   *
+   * Deletes the authenticated user's review for a media item.
+   *
+   * - Requires authentication
+   * - Returns 404 if there was no review to delete (idempotent-friendly but explicit)
+   *
+   * @param mediaType - "movie" | "tv"
+   * @param mediaId   - TMDB media ID
+   * @returns `{ data: "success", error: null }`
+   */
   .delete(
     "/reviews/:mediaType/:mediaId",
-    async ({ user, params: { mediaType, mediaId } }) => {
-      if (user) {
-        const result = await deleteReview(user.id, mediaId, mediaType);
-        return {
-          data: "success",
-          error: null,
-        };
+    async ({ user, params: { mediaType, mediaId }, set }) => {
+      if (!user) throw httpError(401, "Please login or signup to continue");
+
+      const deleted = await deleteReview(user.id, mediaId, mediaType);
+      if (!deleted) {
+        throw httpError(404, "Review not found");
       }
+
+      set.status = 200;
+      return {
+        data: "success",
+        error: null,
+      };
     },
     {
       auth: true,
@@ -102,19 +153,30 @@ export const reviews = new Elysia({ name: "reviews" })
       }),
     },
   )
-  // gets average rating
+
+  /**
+   * GET /reviews/:mediaType/:mediaId/average
+   *
+   * Returns the average rating and total review count for a media item
+   * across all users.
+   *
+   * - Public endpoint (no auth required)
+   * - `avgRating` is `null` when there are no reviews
+   *
+   * @param mediaType - "movie" | "tv"
+   * @param mediaId   - TMDB media ID
+   * @returns `{ data: { avgRating: number|null, reviewCount: number }, error: null }`
+   */
   .get(
     "/reviews/:mediaType/:mediaId/average",
-    async ({ params: { mediaType, mediaId } }) => {
+    async ({ params: { mediaType, mediaId }, set }) => {
       const result = await getAvgRating(mediaType, mediaId);
 
       if (!result) {
-        return {
-          data: null,
-          error: { code: 500, message: "Failed to get average rating!" },
-        };
+        throw httpError(500, "Failed to get average rating!");
       }
 
+      set.status = 200;
       return {
         data: result,
         error: null,

@@ -14,6 +14,9 @@ if (process.env.CLIENT_ORIGIN) {
 }
 
 const isProduction = process.env.NODE_ENV === "production";
+// In development, don't set cookie domain. Browsers ignore/deny Domain=localhost
+// and host-only cookies work across ports on the same site (localhost).
+const cookieDomain = isProduction ? ".frame-rate.io" : undefined;
 
 export const auth: AuthHandler = betterAuth({
   appName: "FrameRate",
@@ -44,7 +47,9 @@ export const auth: AuthHandler = betterAuth({
     cookiePrefix: "framerate",
     useSecureCookies: isProduction,
     defaultCookieAttributes: {
-      domain: ".frame-rate.io",
+      // Only set domain in production so cookies set on API are valid for subdomains
+      // and avoid localhost issues during development.
+      domain: cookieDomain as any,
       httpOnly: true,
       partitioned: isProduction,
       path: "/",

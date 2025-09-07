@@ -1,16 +1,18 @@
 import { db } from "@/drizzle";
 import { movie, movieReview, tv, tvReview } from "@/drizzle/schema";
-import { getReviewTables, getTables } from "@/lib/utils";
+import { getReviewTables } from "@/lib/utils";
 import { validateRating } from "@/lib/validate-rating";
 import type { Review } from "@/types/review";
 import { and, avg, count, eq } from "drizzle-orm";
+import { HttpError } from "@/lib/httpError";
 
 /**
- * Gets user's review for a single media from database
- * @param userId - The user who made the review
- * @param mediaType - The media type to look for (movie or tv)
- * @param mediaId - The media ID to look for
- * @returns An object containing the review data or undefined if it does not exist
+ * Retrieves a single user's review for a specific media item.
+ *
+ * @param userId - The ID of the user who wrote the review
+ * @param mediaType - "movie" | "tv"
+ * @param mediaId - TMDB media ID
+ * @returns `{ liked, watched, review, rating } | undefined`
  */
 export async function getReview(
   userId: string,
@@ -34,10 +36,11 @@ export async function getReview(
 }
 
 /**
- * Gets all of a user's reviews
+ * Retrieves all reviews created by a given user across movies and TV,
+ * merged into a single array.
  *
- * @param userId - The user for whom to get all reviews
- * @returns An array of objects representing media reviews
+ * @param userId - The user whose reviews to fetch
+ * @returns `Array<{ mediaId, mediaType, title, posterPath, rating, createdAt }>`
  */
 export async function getAllReviews(userId: string) {
   const moviePromise = db
@@ -75,12 +78,11 @@ export async function getAllReviews(userId: string) {
 }
 
 /**
- * Gets the average rating and total rating count for some media
- * @param mediaType - "movie" or "tv"
- * @param mediaId - The numeric ID of the media
- * @returns An object with
- *   - avgRating  (number|null): null if there are no reviews
- *   - reviewCount (number)
+ * Computes the average rating and total rating count for a media item.
+ *
+ * @param mediaType - "movie" | "tv"
+ * @param mediaId - TMDB media ID
+ * @returns `{ avgRating: number|null, reviewCount: number }`
  */
 export async function getAvgRating(mediaType: "movie" | "tv", mediaId: number) {
   const tablesMap = getReviewTables();
@@ -108,22 +110,26 @@ type AddReview = {
 };
 
 /**
- * Adds a movie or tv review to the database
+ * Creates or updates a review for a media item (upsert).
  *
- * @param data - Object containing the userID, media type, media ID, and rating
+ * Validation & behavior:
+ * - Validates rating with `validateRating` (throws 400 on failure)
+ * - Inserts a new review with sane defaults (`liked=false`, `watched=true`, `review=null`)
+ * - On conflict (same user + media), updates `rating` and `updatedAt`
  *
- * @returns The newly added review or undefined if it failed
+ * @param data - `{ userId, mediaType, mediaId, rating }`
+ * @returns The inserted/updated review row
  */
 export async function addReview(data: AddReview) {
   const tablesMap = getReviewTables();
   const { table, idCol, idColName } = tablesMap[data.mediaType];
 
-  const { userId, mediaType, mediaId, rating } = data;
+  const { userId, mediaType, mediaId } = data;
+  const rating = (data.rating ?? "").trim();
 
   const error = validateRating(rating);
-
   if (error) {
-    throw new Error(error);
+    throw new HttpError(400, error);
   }
 
   const [result] = await db
@@ -139,7 +145,7 @@ export async function addReview(data: AddReview) {
     })
     .onConflictDoUpdate({
       target: [table.userId, idCol],
-      set: { rating: data.rating, updatedAt: new Date() },
+      set: { rating, updatedAt: new Date() },
     })
     .returning();
 
@@ -147,12 +153,12 @@ export async function addReview(data: AddReview) {
 }
 
 /**
- * Deletes a review for a specific media type and ID that belongs to the active user
+ * Deletes a user's review for a specific media item.
  *
- * @param mediaId - media for which to find a review
- * @param mediaType - type of the media reviewed
- *
- * @returns The deleted review object or undefined if no review existed
+ * @param userId - The author of the review
+ * @param mediaId - TMDB media ID
+ * @param mediaType - "movie" | "tv"
+ * @returns The deleted review row, or `undefined` if none existed
  */
 export async function deleteReview(
   userId: string,

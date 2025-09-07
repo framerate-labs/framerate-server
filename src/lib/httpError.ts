@@ -1,16 +1,27 @@
-// src/lib/httpError.ts
 export class HttpError extends Error {
   constructor(
     public status: number,
-    message: string,
+    public publicMessage: string,
+    public details?: unknown,
+    options?: { cause?: unknown },
   ) {
-    super(message);
-    // restore prototype chain
-    Object.setPrototypeOf(this, HttpError.prototype);
+    super(publicMessage, options);
+    this.name = "HttpError";
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
-// convenience
-export function httpError(status: number, message: string): never {
-  throw new HttpError(status, message);
+// Ergonomic helper (typed as never)
+export function httpError(status: number, publicMessage: string): never;
+export function httpError(
+  status: number,
+  publicMessage: string,
+  details: unknown,
+): never;
+export function httpError(
+  status: number,
+  publicMessage: string,
+  details?: unknown,
+): never {
+  throw new HttpError(status, publicMessage, details);
 }

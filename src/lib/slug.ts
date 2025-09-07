@@ -4,6 +4,7 @@ import { db } from "@/drizzle";
 import { listSlugHistory, list, movie, tv } from "@/drizzle/schema";
 import { and, eq, or } from "drizzle-orm";
 import slugify from "slugify";
+import { HttpError } from "@/lib/httpError";
 
 /**
  * Generates unique slug for any content type.
@@ -24,7 +25,7 @@ export async function generateSlug(
     title === "" ||
     !allowedContentTypes.includes(contentType)
   ) {
-    throw new Error("Invalid title or content type provided.");
+    throw new HttpError(400, "Invalid title or content type provided.");
   }
 
   const baseSlug = slugify(title, { lower: true, strict: true });
@@ -54,7 +55,7 @@ async function slugExists(
   const tableMap = { movie, tv, list };
 
   const table = tableMap[contentType];
-  if (!table) throw new Error("Invalid content type");
+  if (!table) throw new HttpError(400, "Invalid content type");
 
   const baseQuery = db
     .select()
@@ -63,7 +64,7 @@ async function slugExists(
 
   if (contentType === "list") {
     if (!userId) {
-      throw new Error("Please provide a valid user ID.");
+      throw new HttpError(400, "Please provide a valid user ID.");
     }
 
     const result = await baseQuery.where(

@@ -1,14 +1,13 @@
 import type { MovieDetails, TVDetails } from "@/schemas/v1/details-schema";
-import { combinedMediaDetailsSchema } from "@/schemas/v1/details-schema";
-
-import { objectToCamel } from "ts-case-convert";
-
-import { formatNames, getTables, renameKeys } from "@/lib/utils";
-
+import type { MovieDetailsType, TVDetailsType } from "@/types/details";
 import { ZodError } from "zod";
+import { HttpError } from "@/lib/httpError";
+
+import { combinedMediaDetailsSchema } from "@/schemas/v1/details-schema";
+import { objectToCamel } from "ts-case-convert";
+import { formatNames, getTables, renameKeys } from "@/lib/utils";
 import { db } from "@/drizzle";
 import { eq } from "drizzle-orm";
-import type { MovieDetailsType, TVDetailsType } from "@/types/details";
 
 const API_TOKEN = process.env.API_TOKEN as string;
 
@@ -19,15 +18,22 @@ type TMDBError = {
 };
 
 /**
- * Gets details for movie or series by ID
+ * Fetches details for a movie or TV series from TMDB,
+ * validates and normalizes the data, stores missing media
+ * in the local DB, and merges poster/backdrop overrides.
  *
- * @param mediaType - movie or tv
- * @param id - ID of media to fetch
- * @returns An object containing the media data
+ * - Calls TMDB /movie/:id or /tv/:id with credits
+ * - Validates the response with Zod
+ * - Stores the media locally if not already present
+ * - Returns a details object
+ *
+ * @param mediaType - Either "movie" or "tv"
+ * @param id - TMDB media ID
+ * @returns A normalized MovieDetailsType or TVDetailsType
  */
 export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
   if (mediaType !== "movie" && mediaType !== "tv") {
-    throw new Error(`Unsupported media type: ${mediaType}`);
+    throw new HttpError(400, `Unsupported media type: ${mediaType}`);
   }
 
   const url = `https://api.themoviedb.org/3/${mediaType}/${id}?append_to_response=credits&language=en-US`;
@@ -48,11 +54,11 @@ export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
       try {
         const tmdbError = (await response.json()) as TMDBError;
         errorMessage = `TMDB API Error: ${tmdbError.status_code} – ${tmdbError.status_message}`;
-      } catch (jsonError) {
-        // Ignore JSON parsing error if the response wasn't JSON
+      } catch {
+        // Ignore if response wasn’t JSON
       }
       console.error("response", response);
-      throw new Error(errorMessage);
+      throw new HttpError(response.status, errorMessage);
     }
 
     const rawData = await response.json();
@@ -71,20 +77,22 @@ export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
         JSON.stringify(dataWithMediaType, null, 2),
       );
       console.error("Zod errors:", validationResult.error.flatten());
-      throw new Error(
+      throw new HttpError(
+        502,
         `Invalid data received from TMDB API: ${validationResult.error.message}`,
       );
     }
 
     const validatedData = validationResult.data;
 
+    // Trim cast & filter directors
     validatedData.credits.cast = validatedData.credits.cast.slice(0, 12);
     validatedData.credits.crew = validatedData.credits.crew.filter(
       (crewMember) => crewMember.job === "Director",
     );
 
+    // Fetch or insert into DB for local poster/backdrop
     let storedMedia = await getDBImages(id, mediaType);
-
     if (!storedMedia) {
       const title =
         validatedData.media_type === "movie"
@@ -107,11 +115,10 @@ export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
       storedMedia = await addMediaToDB(mediaToAdd, mediaType);
     }
 
+    // Return type-specific object
     if (validatedData.media_type === "movie") {
       const movieData: MovieDetails = validatedData;
-
       const directorList = movieData.credits.crew;
-
       const director = formatNames(directorList);
 
       const finalMovieData = {
@@ -122,16 +129,11 @@ export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
         backdrop_path: storedMedia?.backdropPath ?? movieData.backdrop_path,
       };
 
-      const movieResults = objectToCamel(finalMovieData);
-
-      return movieResults as unknown as MovieDetailsType;
+      return objectToCamel(finalMovieData) as unknown as MovieDetailsType;
     } else {
       const tvData: TVDetails = validatedData;
-
       const creatorList = tvData.created_by;
-
       const creator = formatNames(creatorList);
-
       const { created_by, ...restOfTvData } = tvData;
 
       const tvDataBase = {
@@ -151,9 +153,7 @@ export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
         tvDataBase,
       );
 
-      const tvResults = objectToCamel(renamedTvData);
-
-      return tvResults as unknown as TVDetailsType;
+      return objectToCamel(renamedTvData) as unknown as TVDetailsType;
     }
   } catch (error) {
     if (error instanceof ZodError) {
@@ -166,10 +166,12 @@ export async function fetchDetails(mediaType: "movie" | "tv", id: number) {
 }
 
 /**
- * Gets the poster and backdrop for a movie or series
+ * Retrieves poster and backdrop image paths for a media item
+ * stored in the local DB.
  *
- * @param id - The ID of the media to get
- * @returns The poster and backdrop from the database
+ * @param id - TMDB ID of the media
+ * @param mediaType - "movie" or "tv"
+ * @returns Poster and backdrop paths, or undefined if not found
  */
 export async function getDBImages(id: number, mediaType: "movie" | "tv") {
   const tablesMap = getTables();
@@ -196,10 +198,12 @@ type InsertMedia = {
 };
 
 /**
- * Adds a movie or series to the database if it does not exist
+ * Inserts a movie or TV series into the local DB
+ * if it does not already exist.
  *
- * @param data - The media object to add to the database
- * @returns The created media object
+ * @param data - Media object to add
+ * @param mediaType - "movie" or "tv"
+ * @returns The inserted media row, or undefined if already existed
  */
 export async function addMediaToDB(
   data: InsertMedia,

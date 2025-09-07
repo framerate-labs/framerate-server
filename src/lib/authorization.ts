@@ -1,6 +1,6 @@
 import { db } from "@/drizzle";
 import { list } from "@/drizzle/schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { httpError } from "./httpError";
 
 const resourceConfig = {
@@ -13,42 +13,53 @@ const resourceConfig = {
 
 type ResourceKey = keyof typeof resourceConfig;
 
+type OwnerRow = { ownerId: string };
+
 /**
- * Generic function to authorize ownership of a resource
+ * Authorizes that `userId` owns the given `resource` with `resourceId`.
  *
- * @param resource - The resource type (list, movie, etc.).
- * @param resourceId - The ID of the resource.
- * @param userId - The ID of the user making the request.
+ * Error semantics (minimized information disclosure):
+ * - 401 when `userId` is missing
+ * - 404 when the resource does not exist **or** exists but is not owned by `userId`
+ *   (non-owners are indistinguishable from non-existent resources)
  *
- * @throws 401 if no userID
- * @throws 403 if resource found but not owned by user.
- * @throws 404 if resource not found.
+ * Notes:
+ * - We fetch by ID only, then compare owner. Non-owners get a 404.
+ * - We alias the owner column to `ownerId` and return only that minimal shape.
+ * - We **throw** HttpErrors; callers should `await` and let the error propagate.
  *
- * @returns The found record for handler to consume.
+ * @param resource   One of the configured resource keys (e.g., "list")
+ * @param resourceId Numeric ID of the resource
+ * @param userId     Authenticated user's ID (string)
+ * @returns `{ ownerId: string }` if authorized
+ * @throws HttpError (401 | 404)
  */
 export async function authorizeOwner<R extends ResourceKey>(
   resource: R,
   resourceId: number,
   userId?: string,
-) {
+): Promise<OwnerRow> {
   if (!userId) {
-    return httpError(401, "Unauthorized");
+    throw httpError(401, "Unauthorized");
+  }
+
+  if (!Number.isFinite(resourceId) || resourceId <= 0) {
+    // Treat obviously bad IDs as not found to avoid information leakage
+    throw httpError(404, "Resource does not exist.");
   }
 
   const { table, idCol, ownerCol } = resourceConfig[resource];
 
-  const [record] = await db
-    .select({ ownerId: list.userId })
+  // Fetch by ID only — determine existence first
+  const [row] = await db
+    .select({ ownerId: ownerCol })
     .from(table)
-    .where(and(eq(idCol, resourceId), eq(ownerCol, userId)));
+    .where(eq(idCol, resourceId));
 
-  if (!record) {
-    return httpError(404, "Resource does not exist.");
+  if (!row || row.ownerId !== userId) {
+    // Non-owners treated the same as non-existent resources
+    throw httpError(404, "Resource does not exist.");
   }
 
-  if (record.ownerId !== userId) {
-    return httpError(403, "Forbidden");
-  }
-
-  return record;
+  return row as OwnerRow;
 }
