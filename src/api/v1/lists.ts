@@ -7,12 +7,38 @@ import {
   createList,
   deleteList,
   getLists,
+  getPopularLists,
   updateList,
 } from "@/services/v1/lists";
 import Elysia, { t } from "elysia";
 
 export const lists = new Elysia({ name: "lists" })
   .use(betterAuth)
+
+  /**
+   * GET /lists/popular
+   *
+   * Returns public lists ordered by total view counts (all-time).
+   *
+   * - Public endpoint (no auth)
+   * - Optional `limit` query param (default 10)
+   * - Stable response shape: `{ data, error: null }`
+   */
+  .get(
+    "/lists/popular",
+    async ({ query: { limit }, set }) => {
+      const safeLimit = typeof limit === "number" && limit > 0 ? limit : 10;
+      const data = await getPopularLists(safeLimit);
+
+      set.status = 200;
+      return { data, error: null };
+    },
+    {
+      query: t.Object({
+        limit: t.Optional(t.Number()),
+      }),
+    },
+  )
 
   /**
    * GET /lists
