@@ -2,10 +2,40 @@ import Elysia, { t } from "elysia";
 
 import { auth } from "@/lib/auth";
 import { betterAuth } from "@/middlewares/auth-middleware";
-import { getListData, trackUniqueView } from "@/services/v1/lists";
+import { getListData, getListsByUsername, trackUniqueView } from "@/services/v1/lists";
 
 export const user = new Elysia({ name: "user", prefix: "/user" })
   .use(betterAuth)
+
+  /**
+   * GET /user/:username/lists
+   *
+   * Public endpoint to fetch all lists for a given username.
+   *
+   * Behavior & security:
+   * - No authentication required
+   * - Stable response shape: `{ data, error: null }`
+   *
+   * Status codes:
+   * - 200 on success
+   * - 404 if the user does not exist
+   *
+   * @param username - The user's username
+   * @returns `{ data: List[], error: null }`
+   */
+  .get(
+    "/:username/lists",
+    async ({ params: { username }, set }) => {
+      const results = await getListsByUsername(username);
+      set.status = 200;
+      return { data: results, error: null };
+    },
+    {
+      params: t.Object({
+        username: t.String(),
+      }),
+    },
+  )
 
   /**
    * GET /user/:username/lists/:slug

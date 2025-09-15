@@ -58,6 +58,25 @@ export async function getLists(userId: string) {
 }
 
 /**
+ * Retrieves all lists for a given username.
+ *
+ * @param username - The user's username
+ * @returns An array of lists with a stable `type: "list"`
+ */
+export async function getListsByUsername(username: string) {
+  const [owner] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.username, username));
+
+  if (!owner) {
+    throw new HttpError(404, "User not found");
+  }
+
+  return getLists(owner.id);
+}
+
+/**
  * Updates list values (currently name/slug) if they have changed.
  * Also records slug history when renaming.
  *
@@ -297,7 +316,7 @@ async function getListItems(listId: number) {
     const results = await db
       .select({
         listId: listItem.listId,
-        mediaId: sql<number>`COALESCE(${movie.id}, ${tv.id})`,
+        mediaId: sql<number>`COALESCE(${movie.id}, ${tv.id})`.mapWith(Number),
         listItemId: listItem.id,
         title: sql<string>`COALESCE(${movie.title}, ${tv.title})`,
         posterPath: sql<string>`COALESCE(${movie.posterPath}, ${tv.posterPath})`,
