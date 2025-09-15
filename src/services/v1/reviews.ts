@@ -153,6 +153,48 @@ export async function addReview(data: AddReview) {
 }
 
 /**
+ * Retrieves a single "library row" for the current user and media.
+ * Shape matches items returned by getAllReviews for consistency.
+ */
+export async function getLibraryRow(
+  userId: string,
+  mediaType: "movie" | "tv",
+  mediaId: number,
+) {
+  if (mediaType === "movie") {
+    const [row] = await db
+      .select({
+        mediaId: movieReview.movieId,
+        mediaType: movieReview.mediaType,
+        title: movie.title,
+        posterPath: movie.posterPath,
+        rating: movieReview.rating,
+        createdAt: movieReview.createdAt,
+      })
+      .from(movieReview)
+      .leftJoin(movie, eq(movie.id, movieReview.movieId))
+      .where(and(eq(movieReview.userId, userId), eq(movieReview.movieId, mediaId)));
+
+    return row;
+  } else {
+    const [row] = await db
+      .select({
+        mediaId: tvReview.seriesId,
+        mediaType: tvReview.mediaType,
+        title: tv.title,
+        posterPath: tv.posterPath,
+        rating: tvReview.rating,
+        createdAt: tvReview.createdAt,
+      })
+      .from(tvReview)
+      .leftJoin(tv, eq(tv.id, tvReview.seriesId))
+      .where(and(eq(tvReview.userId, userId), eq(tvReview.seriesId, mediaId)));
+
+    return row;
+  }
+}
+
+/**
  * Deletes a user's review for a specific media item.
  *
  * @param userId - The author of the review

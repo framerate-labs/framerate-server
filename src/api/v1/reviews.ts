@@ -6,6 +6,7 @@ import {
   getAllReviews,
   getAvgRating,
   getReview,
+  getLibraryRow,
 } from "@/services/v1/reviews";
 import Elysia, { t } from "elysia";
 
@@ -97,13 +98,12 @@ export const reviews = new Elysia({ name: "reviews" })
       if (!user) throw httpError(401, "Please login or signup to continue");
 
       const reviewData = { userId: user.id, mediaType, mediaId, rating };
-      const result = await addReview(reviewData);
+      await addReview(reviewData);
 
+      // Return a single "library row" so clients can reconcile efficiently
+      const row = await getLibraryRow(user.id, mediaType, mediaId);
       set.status = 201;
-      return {
-        data: result,
-        error: null,
-      };
+      return { data: row, error: null };
     },
     {
       auth: true,
