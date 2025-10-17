@@ -7,10 +7,13 @@ import * as schema from "@/drizzle/schema";
 
 type AuthHandler = ReturnType<typeof betterAuth>;
 
-const trusted = [];
+const trusted: string[] = [];
 
-if (process.env.CLIENT_ORIGIN) {
-  trusted.push(process.env.CLIENT_ORIGIN);
+if (process.env.CLIENT_ORIGIN) trusted.push(process.env.CLIENT_ORIGIN);
+if (process.env.NODE_ENV === "development") {
+  if (process.env.DEV_ORIGIN) trusted.push(process.env.DEV_ORIGIN);
+  // Fallbacks
+  trusted.push("http://localhost:5173");
 }
 
 const isProduction = process.env.NODE_ENV === "production";

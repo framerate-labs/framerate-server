@@ -8,8 +8,12 @@ import { api } from "@/api/api-index";
 import { errorPlugin } from "@/plugins/error-plugin";
 
 const allowedOrigins = ["https://www.frame-rate.io", "https://frame-rate.io"];
-if (process.env.NODE_ENV === "development" && process.env.DEV_ORIGIN) {
-  allowedOrigins.push("http://192.168.5.6", process.env.DEV_ORIGIN);
+if (process.env.NODE_ENV === "development") {
+  allowedOrigins.push(
+    "http://192.168.5.6",
+    "http://localhost:5173",
+    "http://localhost:8000",
+  );
 }
 
 // Non-spoofable client IP for rate limiting
@@ -82,7 +86,7 @@ const app = new Elysia()
       origin: allowedOrigins,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       credentials: true,
-      allowedHeaders: ["Content-Type", "Authorization"],
+      // maxAge: 3600,
     }),
   )
 

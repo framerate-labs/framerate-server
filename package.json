@@ -20,7 +20,7 @@
     "better-auth": "^1.2.7",
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.42.0",
-    "elysia": "^1.3.8",
+    "elysia": "^1.4.12",
     "elysia-rate-limit": "^4.3.0",
     "postgres": "^3.4.5",
     "slugify": "^1.6.6",
