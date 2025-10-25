@@ -10,8 +10,8 @@ import { errorPlugin } from "@/plugins/error-plugin";
 const allowedOrigins = ["https://www.frame-rate.io", "https://frame-rate.io"];
 if (process.env.NODE_ENV === "development") {
   allowedOrigins.push(
-    "http://192.168.5.6",
-    "http://localhost:5173",
+    "http://192.168.5.6:3000",
+    "http://localhost:3000",
     "http://localhost:8000",
   );
 }
