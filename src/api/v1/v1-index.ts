@@ -6,9 +6,11 @@ import { listItems } from "./list-items";
 import { reviews } from "./reviews";
 import { actions } from "./actions";
 import { user } from "./user";
+import { demo } from "./demo";
 
 export const v1 = new Elysia({ name: "apiV1", prefix: "/v1" })
   .use(actions)
+  .use(demo)
   .use(details)
   .use(lists)
   .use(listItems)
