@@ -9,12 +9,23 @@ type AuthHandler = ReturnType<typeof betterAuth>;
 
 const trusted: string[] = [];
 
-if (process.env.CLIENT_ORIGIN) trusted.push(process.env.CLIENT_ORIGIN);
-if (process.env.NODE_ENV === "development") {
-  if (process.env.DEV_ORIGIN) trusted.push(process.env.DEV_ORIGIN);
-  // Fallbacks
-  trusted.push("http://localhost:5173");
+// In production, include both www and non-www versions
+// if (process.env.NODE_ENV === "production") {
+//   trusted.push()
+//   trusted.push("https://www.frame-rate.io", "https://frame-rate.io");
+// } else {
+//   // Development
+//   if (process.env.CLIENT_ORIGIN) trusted.push(process.env.CLIENT_ORIGIN);
+//   if (process.env.DEV_ORIGIN) trusted.push(process.env.DEV_ORIGIN);
+//   // Fallback
+//   trusted.push("http://localhost:5173");
+// }
+
+if (process.env.NODE_ENV === "production") {
+  if (process.env.CLIENT_ORIGIN2) trusted.push(process.env.CLIENT_ORIGIN2);
 }
+
+if (process.env.CLIENT_ORIGIN) trusted.push(process.env.CLIENT_ORIGIN);
 
 const isProduction = process.env.NODE_ENV === "production";
 // In development, don't set cookie domain. Browsers ignore/deny Domain=localhost
